@@ -16,8 +16,8 @@ import {
 } from 'lucide-react';
 import {
   TransactionTicket,
-  CATEGORIES_CONFIG,
 } from '../types/expense';
+import { categoriesService } from '../services/categoriesService';
 import { ConfirmDialog } from './ConfirmDialog';
 
 interface ExpenseListProps {
@@ -149,7 +149,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
             className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
           >
             <option value="all">Toutes les catégories</option>
-            {Object.keys(CATEGORIES_CONFIG).map((cat) => (
+            {categoriesService.getCategoryNames().map((cat) => (
               <option key={cat} value={cat}>
                 {cat}
               </option>
@@ -231,7 +231,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
                 {filteredExpenses.map((exp) => {
-                  const meta = CATEGORIES_CONFIG[exp.categorie] || CATEGORIES_CONFIG.Autre;
+                  const meta = categoriesService.getCategoryMeta(exp.categorie);
                   return (
                     <tr
                       key={exp.id}

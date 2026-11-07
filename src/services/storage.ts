@@ -2,15 +2,18 @@
  * Service de stockage modulaire et autonome pour ScanDépense
  * - Stockage principal : IndexedDB
  * - Repli automatique : LocalStorage
- * - Importation/Exportation robuste et batch saving
+ * - Importation/Exportation flexible (fusion ou remplacement)
+ * - Gestion pérenne du cycle de vie (pas de réinjection automatique intempestive)
  */
-import { TransactionTicket, ArticleItem } from '../types/expense';
+import { TransactionTicket, ArticleItem, ExpenseCategory } from '../types/expense';
 import { SAMPLE_EXPENSES } from '../data/sampleReceipts';
+import { categoriesService } from './categoriesService';
 
 const DB_NAME = 'ScanDepenseDB';
 const DB_VERSION = 2;
 const STORE_NAME = 'tickets';
 const LOCALSTORAGE_KEY = 'scandepense_tickets_backup';
+const HAS_INITIALIZED_KEY = 'scandepense_has_initialized_v2';
 
 class StorageService {
   private db: IDBDatabase | null = null;
@@ -61,6 +64,25 @@ class StorageService {
     });
   }
 
+  /**
+   * Initialisation première visite uniquement.
+   * Ne réinjecte JAMAIS de données si l'utilisateur a réinitialisé la base.
+   */
+  public async seedInitialDataIfFirstTime(): Promise<void> {
+    try {
+      const alreadyInitialized = localStorage.getItem(HAS_INITIALIZED_KEY);
+      if (!alreadyInitialized) {
+        localStorage.setItem(HAS_INITIALIZED_KEY, 'true');
+        const existing = await this.getAll();
+        if (existing.length === 0) {
+          await this.saveBatch(SAMPLE_EXPENSES);
+        }
+      }
+    } catch (e) {
+      console.warn('Initialisation première visite ignorée:', e);
+    }
+  }
+
   public async getAll(): Promise<TransactionTicket[]> {
     await this.ensureReady();
 
@@ -91,7 +113,6 @@ class StorageService {
 
   public async save(ticket: TransactionTicket): Promise<TransactionTicket> {
     await this.ensureReady();
-
     const normalized = this.normalizeTicket(ticket);
 
     if (this.isIndexedDBAvailable && this.db) {
@@ -206,6 +227,10 @@ class StorageService {
     this.deleteFromLocalStorage(id);
   }
 
+  /**
+   * Réinitialisation totale : vide IndexedDB et LocalStorage
+   * et verrouille l'initialisation pour ne PAS re-seeder automatiquement
+   */
   public async clear(): Promise<void> {
     await this.ensureReady();
 
@@ -214,8 +239,9 @@ class StorageService {
         try {
           const tx = this.db!.transaction(STORE_NAME, 'readwrite');
           const store = tx.objectStore(STORE_NAME);
-          store.clear();
+          const req = store.clear();
 
+          req.onsuccess = () => resolve();
           tx.oncomplete = () => resolve();
           tx.onerror = () => resolve();
         } catch {
@@ -226,19 +252,24 @@ class StorageService {
 
     try {
       localStorage.removeItem(LOCALSTORAGE_KEY);
+      localStorage.removeItem('scandepense_tickets_backup');
       localStorage.removeItem('scandepense_expenses_backup');
+      // Marquer comme initialisé pour empêcher tout auto-seed
+      localStorage.setItem(HAS_INITIALIZED_KEY, 'true');
     } catch {
       // Ignoré
     }
   }
 
+  /**
+   * Recharge explicitement les données de test (action volontaire de l'utilisateur)
+   */
   public async seedDemoData(force: boolean = false): Promise<TransactionTicket[]> {
-    const existing = await this.getAll();
-    if (existing.length === 0 || force) {
+    if (force) {
       await this.saveBatch(SAMPLE_EXPENSES);
-      return SAMPLE_EXPENSES;
+      return this.getAll();
     }
-    return existing;
+    return this.getAll();
   }
 
   public async exportJSON(): Promise<string> {
@@ -255,12 +286,25 @@ class StorageService {
 
   /**
    * Importation flexible et robuste de données JSON
+   * - mode = 'merge' : ajoute les tickets du fichier aux tickets existants
+   * - mode = 'replace' : remplace l'intégralité de la base par le contenu du fichier (même si vide ou quasi-vide)
    */
-  public async importJSON(jsonString: string): Promise<{ importedCount: number; errors: string[] }> {
+  public async importJSON(
+    jsonString: string,
+    mode: 'merge' | 'replace' = 'merge'
+  ): Promise<{ importedCount: number; totalCount: number; errors: string[] }> {
     const errors: string[] = [];
     const validTickets: TransactionTicket[] = [];
 
     try {
+      if (!jsonString || !jsonString.trim()) {
+        if (mode === 'replace') {
+          await this.clear();
+          return { importedCount: 0, totalCount: 0, errors: ['Contenu vide : la base a été entièrement vidée.'] };
+        }
+        return { importedCount: 0, totalCount: (await this.getAll()).length, errors: ['Contenu JSON vide.'] };
+      }
+
       const parsed = JSON.parse(jsonString);
       let list: any[] = [];
 
@@ -271,77 +315,183 @@ class StorageService {
         else if (Array.isArray(parsed.expenses)) list = parsed.expenses;
         else if (Array.isArray(parsed.tickets)) list = parsed.tickets;
         else if (Array.isArray(parsed.data)) list = parsed.data;
-        else {
-          throw new Error('Aucun tableau de transactions ("transactions", "expenses", ou "data") trouvé dans le JSON.');
+        else if (Array.isArray(parsed.items)) list = parsed.items;
+        else if (Array.isArray(parsed.records)) list = parsed.records;
+        else if (
+          // Objet unique représentant une transaction seule
+          parsed.commercant !== undefined ||
+          parsed.montant_total !== undefined ||
+          parsed.merchant !== undefined ||
+          parsed.total !== undefined ||
+          parsed.amount !== undefined ||
+          parsed.categorie !== undefined ||
+          parsed.category !== undefined ||
+          parsed.articles !== undefined
+        ) {
+          list = [parsed];
+        } else {
+          // Objet vide ou méta sans tableau
+          list = [];
         }
       } else {
-        throw new Error('Structure JSON invalide. Format tableau ou objet avec liste attendu.');
+        throw new Error('Structure JSON invalide. Format attendu : [ ... ] ou { "transactions": [ ... ] }');
       }
 
+      // Si le fichier est complètement vide
       if (list.length === 0) {
-        return { importedCount: 0, errors: ['Le fichier JSON ne contient aucune transaction.'] };
+        if (mode === 'replace') {
+          await this.clear();
+          return {
+            importedCount: 0,
+            totalCount: 0,
+            errors: ['Le fichier ne contient aucun ticket : la base a été réinitialisée à 0 transaction.'],
+          };
+        }
+        return {
+          importedCount: 0,
+          totalCount: (await this.getAll()).length,
+          errors: ['Le fichier JSON ne contient aucune transaction à ajouter.'],
+        };
       }
+
+      // Traitement tolérant même pour les objets quasi-vides
+      const now = new Date();
+      const defaultDate = now.toISOString().split('T')[0];
+      const defaultHeure = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
       for (let i = 0; i < list.length; i++) {
         const item = list[i];
         if (!item || typeof item !== 'object') continue;
 
-        // Commerçant
-        const rawCommercant = item.commercant || item.merchant || item.nom;
-        const commercant = String(rawCommercant || '').trim();
-
-        // Montant Total
-        const rawMontant = item.montant_total !== undefined ? item.montant_total : item.totalAmount;
-        let montant_total = 0;
-        if (typeof rawMontant === 'number') {
-          montant_total = rawMontant;
-        } else if (typeof rawMontant === 'string') {
-          montant_total = parseFloat(rawMontant.replace(',', '.'));
-        }
-
+        // Commerçant tolérant
+        const rawCommercant =
+          item.commercant ||
+          item.merchant ||
+          item.magasin ||
+          item.nom ||
+          item.name ||
+          item.enseigne ||
+          item.store ||
+          item.title ||
+          item.fournisseur;
+        let commercant = String(rawCommercant || '').trim();
         if (!commercant) {
-          errors.push(`Ligne ${i + 1} ignorée : commerçant absent.`);
-          continue;
-        }
-        if (isNaN(montant_total) || montant_total < 0) {
-          errors.push(`Ligne ${i + 1} (${commercant}) : montant invalide.`);
-          continue;
+          commercant = item.categorie ? `Dépense ${item.categorie}` : `Ticket #${i + 1}`;
         }
 
-        // TVA
-        const rawTva = item.tva !== undefined ? item.tva : item.vatAmount;
-        let tva = 0;
-        if (typeof rawTva === 'number') {
-          tva = rawTva;
-        } else if (typeof rawTva === 'string') {
-          tva = parseFloat(rawTva.replace(',', '.')) || 0;
-        }
-
-        // Articles
+        // Articles tolérants
         const articles: ArticleItem[] = [];
+        let articlesSum = 0;
         if (Array.isArray(item.articles)) {
           for (const art of item.articles) {
             if (art && typeof art === 'object') {
-              const nom = String(art.nom || art.name || 'Article').trim();
+              const artNom = String(art.nom || art.name || 'Article').trim();
               const prixRaw = art.prix !== undefined ? art.prix : art.price;
-              const prix = typeof prixRaw === 'number' ? prixRaw : parseFloat(String(prixRaw || 0).replace(',', '.')) || 0;
+              const prix =
+                typeof prixRaw === 'number'
+                  ? prixRaw
+                  : parseFloat(String(prixRaw || 0).replace(/[^\d.,-]/g, '').replace(',', '.')) || 0;
               const qteRaw = art.quantite !== undefined ? art.quantite : art.quantity;
-              const quantite = typeof qteRaw === 'number' ? qteRaw : parseInt(String(qteRaw || 1), 10) || 1;
-              articles.push({ nom, prix, quantite });
+              const quantite =
+                typeof qteRaw === 'number'
+                  ? qteRaw
+                  : parseInt(String(qteRaw || 1).replace(/[^\d]/g, ''), 10) || 1;
+              articles.push({ nom: artNom, prix: Number(prix.toFixed(2)), quantite });
+              articlesSum += prix * quantite;
             }
           }
         }
 
+        // Montant Total tolérant
+        const rawMontant =
+          item.montant_total !== undefined
+            ? item.montant_total
+            : item.totalAmount !== undefined
+            ? item.totalAmount
+            : item.montant !== undefined
+            ? item.montant
+            : item.total !== undefined
+            ? item.total
+            : item.amount !== undefined
+            ? item.amount
+            : item.prix !== undefined
+            ? item.prix
+            : item.price;
+
+        let montant_total = 0;
+        if (typeof rawMontant === 'number') {
+          montant_total = rawMontant;
+        } else if (typeof rawMontant === 'string') {
+          const cleaned = rawMontant.replace(/[^\d.,-]/g, '').replace(',', '.');
+          montant_total = parseFloat(cleaned) || 0;
+        } else if (articlesSum > 0) {
+          montant_total = articlesSum;
+        }
+
+        // Date tolérante (YYYY-MM-DD ou DD/MM/YYYY ou timestamp)
+        let date = String(item.date || item.date_ticket || '').trim();
+        if (/^\d{4}-\d{2}-\d{2}/.test(date)) {
+          date = date.substring(0, 10);
+        } else if (/^\d{2}[/-]\d{2}[/-]\d{4}/.test(date)) {
+          const parts = date.split(/[/-]/);
+          date = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        } else {
+          date = defaultDate;
+        }
+
+        // Heure tolérante (HH:MM ou HHhMM)
+        let heure = String(item.heure || item.time || item.horaire || '').trim();
+        if (/^\d{1,2}[:h]\d{2}/.test(heure)) {
+          heure = heure.replace('h', ':');
+          if (heure.length === 4) heure = '0' + heure;
+        } else {
+          heure = defaultHeure;
+        }
+
+        // TVA tolérante
+        const rawTva =
+          item.tva !== undefined
+            ? item.tva
+            : item.vatAmount !== undefined
+            ? item.vatAmount
+            : item.tax !== undefined
+            ? item.tax
+            : item.montant_tva;
+        let tva = 0;
+        if (typeof rawTva === 'number') {
+          tva = rawTva;
+        } else if (typeof rawTva === 'string') {
+          const cleaned = rawTva.replace(/[^\d.,-]/g, '').replace(',', '.');
+          tva = parseFloat(cleaned) || 0;
+        }
+
+        // Catégorie tolérante
+        const rawCategory = String(item.categorie || item.category || '').trim();
+        const configuredCats = categoriesService.getCategoryNames();
+        let categorie: ExpenseCategory = 'Autre';
+        if (rawCategory) {
+          const match = configuredCats.find((c) => c.toLowerCase() === rawCategory.toLowerCase());
+          if (match) {
+            categorie = match;
+          } else {
+            categorie = rawCategory; // Conserve la catégorie personnalisée de l'import
+          }
+        } else if (configuredCats.length > 0) {
+          categorie = configuredCats[0];
+        }
+
+        const sous_categorie = String(item.sous_categorie || item.sousCategorie || item.subCategory || 'Divers').trim();
+
         const validItem: TransactionTicket = {
           id: item.id ? String(item.id) : `rec_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`,
-          date: item.date || new Date().toISOString().split('T')[0],
-          heure: item.heure || item.time || '12:00',
+          date,
+          heure,
           commercant,
           montant_total: Number(montant_total.toFixed(2)),
           tva: Number(tva.toFixed(2)),
-          taux_tva: typeof item.taux_tva === 'number' ? item.taux_tva : (typeof item.vatRate === 'number' ? item.vatRate : undefined),
-          categorie: item.categorie || item.category || 'Autre',
-          sous_categorie: item.sous_categorie || item.sousCategorie || 'Divers',
+          taux_tva: typeof item.taux_tva === 'number' ? item.taux_tva : undefined,
+          categorie,
+          sous_categorie: sous_categorie || 'Divers',
           articles,
           fichier_image: item.fichier_image || item.receiptImageData || undefined,
           mode_paiement: item.mode_paiement || item.paymentMethod || 'Carte Bancaire',
@@ -351,14 +501,21 @@ class StorageService {
         validTickets.push(validItem);
       }
 
+      if (mode === 'replace') {
+        // En mode remplacement : on vide d'abord TOUTE l'ancienne base
+        await this.clear();
+      }
+
       if (validTickets.length > 0) {
         await this.saveBatch(validTickets);
       }
+
+      const totalAfter = (await this.getAll()).length;
+      return { importedCount: validTickets.length, totalCount: totalAfter, errors };
     } catch (e: any) {
       errors.push(`Erreur de lecture du fichier JSON: ${e.message}`);
+      return { importedCount: 0, totalCount: (await this.getAll()).length, errors };
     }
-
-    return { importedCount: validTickets.length, errors };
   }
 
   public async exportCSV(): Promise<string> {

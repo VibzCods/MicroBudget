@@ -5,9 +5,9 @@
  * Zone 3: Action primaire (Nouveau Scan) + Sélecteur de thème
  */
 import React from 'react';
-import { Camera, Sun, Moon, ReceiptText, BarChart3, Database } from 'lucide-react';
+import { Camera, Sun, Moon, ReceiptText, BarChart3, Database, FolderTree } from 'lucide-react';
 
-export type ActiveTab = 'expenses' | 'scan' | 'stats' | 'data';
+export type ActiveTab = 'expenses' | 'scan' | 'stats' | 'categories' | 'data';
 
 interface NavbarProps {
   activeTab: ActiveTab;
@@ -27,13 +27,13 @@ export const Navbar: React.FC<NavbarProps> = ({
   return (
     <header className="sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border-b border-slate-200 dark:border-slate-800 transition-colors">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between gap-8 h-16">
+        <div className="flex items-center justify-between gap-6 h-16">
           
           {/* Zone 1: Marque & Logo minimaliste */}
           <div className="flex items-center gap-3 shrink-0">
             <button
               onClick={() => onTabChange('expenses')}
-              className="flex items-center gap-2.5 text-left focus:outline-none group"
+              className="flex items-center gap-2.5 text-left focus:outline-none group cursor-pointer"
             >
               <div className="w-9 h-9 rounded-lg bg-emerald-600 dark:bg-emerald-500 flex items-center justify-center text-white shadow-sm transition-transform group-hover:scale-105">
                 <ReceiptText className="w-5 h-5" />
@@ -45,12 +45,12 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* Zone 2: Navigation principale (liens sur une seule ligne) */}
-          <nav className="hidden md:flex items-center gap-6 text-sm font-medium">
+          <nav className="hidden md:flex items-center gap-5 text-sm font-medium">
             <button
               onClick={() => onTabChange('expenses')}
-              className={`flex items-center gap-2 pb-1 transition-colors whitespace-nowrap border-b-2 ${
+              className={`flex items-center gap-1.5 pb-1 transition-colors whitespace-nowrap border-b-2 cursor-pointer ${
                 activeTab === 'expenses'
-                  ? 'border-emerald-600 text-emerald-600 dark:border-emerald-400 dark:text-emerald-400'
+                  ? 'border-emerald-600 text-emerald-600 dark:border-emerald-400 dark:text-emerald-400 font-semibold'
                   : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
@@ -63,38 +63,50 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <button
               onClick={() => onTabChange('scan')}
-              className={`flex items-center gap-2 pb-1 transition-colors whitespace-nowrap border-b-2 ${
+              className={`flex items-center gap-1.5 pb-1 transition-colors whitespace-nowrap border-b-2 cursor-pointer ${
                 activeTab === 'scan'
-                  ? 'border-emerald-600 text-emerald-600 dark:border-emerald-400 dark:text-emerald-400'
+                  ? 'border-emerald-600 text-emerald-600 dark:border-emerald-400 dark:text-emerald-400 font-semibold'
                   : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               <Camera className="w-4 h-4" />
-              <span>Scanner un Ticket</span>
+              <span>Scanner</span>
             </button>
 
             <button
               onClick={() => onTabChange('stats')}
-              className={`flex items-center gap-2 pb-1 transition-colors whitespace-nowrap border-b-2 ${
+              className={`flex items-center gap-1.5 pb-1 transition-colors whitespace-nowrap border-b-2 cursor-pointer ${
                 activeTab === 'stats'
-                  ? 'border-emerald-600 text-emerald-600 dark:border-emerald-400 dark:text-emerald-400'
+                  ? 'border-emerald-600 text-emerald-600 dark:border-emerald-400 dark:text-emerald-400 font-semibold'
                   : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               <BarChart3 className="w-4 h-4" />
-              <span>Analyses & Graphiques</span>
+              <span>Analyses</span>
+            </button>
+
+            <button
+              onClick={() => onTabChange('categories')}
+              className={`flex items-center gap-1.5 pb-1 transition-colors whitespace-nowrap border-b-2 cursor-pointer ${
+                activeTab === 'categories'
+                  ? 'border-emerald-600 text-emerald-600 dark:border-emerald-400 dark:text-emerald-400 font-semibold'
+                  : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <FolderTree className="w-4 h-4" />
+              <span>Catégories</span>
             </button>
 
             <button
               onClick={() => onTabChange('data')}
-              className={`flex items-center gap-2 pb-1 transition-colors whitespace-nowrap border-b-2 ${
+              className={`flex items-center gap-1.5 pb-1 transition-colors whitespace-nowrap border-b-2 cursor-pointer ${
                 activeTab === 'data'
-                  ? 'border-emerald-600 text-emerald-600 dark:border-emerald-400 dark:text-emerald-400'
+                  ? 'border-emerald-600 text-emerald-600 dark:border-emerald-400 dark:text-emerald-400 font-semibold'
                   : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               <Database className="w-4 h-4" />
-              <span>Sauvegardes & Données</span>
+              <span>Sauvegardes</span>
             </button>
           </nav>
 
@@ -103,14 +115,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               onClick={onToggleTheme}
               aria-label="Basculer le thème"
-              className="p-2 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              className="p-2 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
             >
               {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
 
             <button
               onClick={() => onTabChange('scan')}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 dark:bg-emerald-500 dark:hover:bg-emerald-600 rounded-lg shadow-sm transition-colors whitespace-nowrap shrink-0"
+              className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 dark:bg-emerald-500 dark:hover:bg-emerald-600 rounded-lg shadow-sm transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               <Camera className="w-4 h-4" />
               <span>Scanner</span>
@@ -122,7 +134,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         <div className="flex md:hidden items-center justify-around py-2 border-t border-slate-100 dark:border-slate-800 text-xs">
           <button
             onClick={() => onTabChange('expenses')}
-            className={`flex flex-col items-center gap-1 py-1 px-2 ${
+            className={`flex flex-col items-center gap-1 py-1 px-1.5 cursor-pointer ${
               activeTab === 'expenses' ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-slate-500'
             }`}
           >
@@ -131,7 +143,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
           <button
             onClick={() => onTabChange('scan')}
-            className={`flex flex-col items-center gap-1 py-1 px-2 ${
+            className={`flex flex-col items-center gap-1 py-1 px-1.5 cursor-pointer ${
               activeTab === 'scan' ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-slate-500'
             }`}
           >
@@ -140,7 +152,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
           <button
             onClick={() => onTabChange('stats')}
-            className={`flex flex-col items-center gap-1 py-1 px-2 ${
+            className={`flex flex-col items-center gap-1 py-1 px-1.5 cursor-pointer ${
               activeTab === 'stats' ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-slate-500'
             }`}
           >
@@ -148,8 +160,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span>Stats</span>
           </button>
           <button
+            onClick={() => onTabChange('categories')}
+            className={`flex flex-col items-center gap-1 py-1 px-1.5 cursor-pointer ${
+              activeTab === 'categories' ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-slate-500'
+            }`}
+          >
+            <FolderTree className="w-4 h-4" />
+            <span>Catégories</span>
+          </button>
+          <button
             onClick={() => onTabChange('data')}
-            className={`flex flex-col items-center gap-1 py-1 px-2 ${
+            className={`flex flex-col items-center gap-1 py-1 px-1.5 cursor-pointer ${
               activeTab === 'data' ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-slate-500'
             }`}
           >

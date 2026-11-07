@@ -11,6 +11,7 @@ import { ExpenseList } from './components/ExpenseList';
 import { DataManagement } from './components/DataManagement';
 import { ExpenseModal } from './components/ExpenseModal';
 import { ManualExpenseModal } from './components/ManualExpenseModal';
+import { CategoriesManager } from './components/CategoriesManager';
 import { storageService } from './services/storage';
 import { TransactionTicket } from './types/expense';
 import { CheckCircle2 } from 'lucide-react';
@@ -50,7 +51,8 @@ export default function App() {
     try {
       setIsLoading(true);
       await storageService.init();
-      const loaded = await storageService.seedDemoData(false);
+      await storageService.seedInitialDataIfFirstTime();
+      const loaded = await storageService.getAll();
       setExpenses(loaded);
     } catch (e) {
       console.error('Erreur de chargement:', e);
@@ -143,10 +145,15 @@ export default function App() {
               <StatsModule expenses={expenses} isDark={isDark} />
             )}
 
+            {activeTab === 'categories' && (
+              <CategoriesManager onCategoriesChanged={loadExpenses} />
+            )}
+
             {activeTab === 'data' && (
               <DataManagement
                 expenses={expenses}
                 onDataChanged={loadExpenses}
+                onNavigateToCategories={() => setActiveTab('categories')}
               />
             )}
           </>

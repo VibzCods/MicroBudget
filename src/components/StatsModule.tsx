@@ -23,7 +23,8 @@ import {
   DoughnutController,
   LineController,
 } from 'chart.js';
-import { TransactionTicket, TimeFilter, CATEGORIES_CONFIG } from '../types/expense';
+import { TransactionTicket, TimeFilter } from '../types/expense';
+import { categoriesService } from '../services/categoriesService';
 import {
   TrendingUp,
   Receipt,
@@ -165,7 +166,7 @@ export const StatsModule: React.FC<StatsModuleProps> = ({ expenses, isDark }) =>
     const categories = Object.keys(stats.byCategory);
     const dataValues = categories.map((cat) => stats.byCategory[cat].total);
     const backgroundColors = categories.map(
-      (cat) => CATEGORIES_CONFIG[cat as keyof typeof CATEGORIES_CONFIG]?.color || '#94a3b8'
+      (cat) => categoriesService.getCategoryMeta(cat).color
     );
 
     const ctx = categoryChartRef.current.getContext('2d');

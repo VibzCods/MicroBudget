@@ -15,14 +15,7 @@
  * - fichier_image (string / base64 ou URL blob locale, optionnel)
  */
 
-export type ExpenseCategory =
-  | 'Alimentation'
-  | 'Transport'
-  | 'Logement'
-  | 'Loisirs'
-  | 'Santé'
-  | 'High-Tech'
-  | 'Autre';
+export type ExpenseCategory = string;
 
 export interface ArticleItem {
   nom: string;

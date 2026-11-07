@@ -24,9 +24,9 @@ import {
   TransactionTicket,
   ExpenseCategory,
   ArticleItem,
-  CATEGORIES_CONFIG,
-  SOUS_CATEGORIES_MAP,
 } from '../types/expense';
+import { categoriesService } from '../services/categoriesService';
+import { ArticlesSummaryRepere } from './ArticlesSummaryRepere';
 import {
   preprocessImage,
   runOcrOnImage,
@@ -78,8 +78,13 @@ export const ScanModule: React.FC<ScanModuleProps> = ({ onSaveExpense, onCancel 
   // Synchronisation de la sous-catégorie par défaut lors du changement de catégorie
   const handleCategoryChange = (newCat: ExpenseCategory) => {
     setCategorie(newCat);
-    const availableSubs = SOUS_CATEGORIES_MAP[newCat] || ['Divers'];
-    setSousCategorie(availableSubs[0]);
+    const availableSubs = categoriesService.getSubcategories(newCat);
+    setSousCategorie(availableSubs[0] || 'Divers');
+  };
+
+  const handleSumArticlesToTotal = () => {
+    const sum = articles.reduce((acc, a) => acc + (a.prix || 0) * (a.quantite || 1), 0);
+    setMontantTotal(Number(sum.toFixed(2)));
   };
 
   useEffect(() => {
@@ -630,7 +635,7 @@ export const ScanModule: React.FC<ScanModuleProps> = ({ onSaveExpense, onCancel 
                     onChange={(e) => handleCategoryChange(e.target.value as ExpenseCategory)}
                     className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
-                    {Object.keys(CATEGORIES_CONFIG).map((cat) => (
+                    {categoriesService.getCategoryNames().map((cat) => (
                       <option key={cat} value={cat}>
                         {cat}
                       </option>
@@ -648,7 +653,7 @@ export const ScanModule: React.FC<ScanModuleProps> = ({ onSaveExpense, onCancel 
                     onChange={(e) => setSousCategorie(e.target.value)}
                     className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
-                    {(SOUS_CATEGORIES_MAP[categorie] || ['Divers']).map((sub) => (
+                    {categoriesService.getSubcategories(categorie).map((sub) => (
                       <option key={sub} value={sub}>
                         {sub}
                       </option>
@@ -657,20 +662,28 @@ export const ScanModule: React.FC<ScanModuleProps> = ({ onSaveExpense, onCancel 
                 </div>
               </div>
 
-              {/* Tableau des articles [{ nom, prix, quantite }] */}
+              {/* Tableau des articles [{ nom, prix, quantite }] AVEC POINT DE REPÈRE */}
               <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
                     articles ({articles.length})
                   </span>
                   <button
+                    type="button"
                     onClick={handleAddArticle}
-                    className="text-xs font-medium text-emerald-600 dark:text-emerald-400 flex items-center gap-1"
+                    className="text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 flex items-center gap-1 cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Ajouter un article</span>
                   </button>
                 </div>
+
+                {/* Point de repère articles pendant la modification */}
+                <ArticlesSummaryRepere
+                  articles={articles}
+                  montantTotal={montantTotal}
+                  onApplyTotal={handleSumArticlesToTotal}
+                />
 
                 {articles.length === 0 ? (
                   <div className="py-3 text-center text-xs text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-lg">

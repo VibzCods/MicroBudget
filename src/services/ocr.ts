@@ -8,9 +8,8 @@ import {
   ExpenseCategory,
   TransactionTicket,
   ArticleItem,
-  CATEGORIES_CONFIG,
-  SOUS_CATEGORIES_MAP,
 } from '../types/expense';
+import { categoriesService } from './categoriesService';
 
 export interface PreprocessOptions {
   contrast?: number;
@@ -377,21 +376,29 @@ function detectCategoryAndSub(
 ): { categorie: ExpenseCategory; sous_categorie: string } {
   const corpus = (commercant + ' ' + articles.map((a) => a.nom).join(' ') + ' ' + rawText).toLowerCase();
 
-  let detectedCat: ExpenseCategory = 'Autre';
+  const allConfigured = categoriesService.getAll();
+  const defaultCats = categoriesService.getCategoryNames();
+  let detectedCat: ExpenseCategory = defaultCats[defaultCats.length - 1] || 'Autre';
 
-  for (const [catName, meta] of Object.entries(CATEGORIES_CONFIG)) {
-    for (const kw of meta.keywords) {
-      if (corpus.includes(kw)) {
-        detectedCat = catName as ExpenseCategory;
-        break;
+  for (const cat of allConfigured) {
+    if (corpus.includes(cat.nom.toLowerCase())) {
+      detectedCat = cat.nom;
+      break;
+    }
+    if (cat.keywords) {
+      for (const kw of cat.keywords) {
+        if (corpus.includes(kw.toLowerCase())) {
+          detectedCat = cat.nom;
+          break;
+        }
       }
     }
-    if (detectedCat !== 'Autre') break;
+    if (detectedCat === cat.nom) break;
   }
 
   // Déduction de la sous-catégorie
-  const subOptions = SOUS_CATEGORIES_MAP[detectedCat] || ['Divers'];
-  let detectedSub = subOptions[0];
+  const subOptions = categoriesService.getSubcategories(detectedCat);
+  let detectedSub = subOptions[0] || 'Divers';
 
   if (detectedCat === 'Alimentation') {
     if (corpus.includes('boulangerie') || corpus.includes('croissant') || corpus.includes('pain')) {

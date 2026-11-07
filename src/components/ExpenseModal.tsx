@@ -10,10 +10,10 @@ import {
   TransactionTicket,
   ExpenseCategory,
   ArticleItem,
-  CATEGORIES_CONFIG,
-  SOUS_CATEGORIES_MAP,
 } from '../types/expense';
+import { categoriesService } from '../services/categoriesService';
 import { ConfirmDialog } from './ConfirmDialog';
+import { ArticlesSummaryRepere } from './ArticlesSummaryRepere';
 
 interface ExpenseModalProps {
   expense: TransactionTicket | null;
@@ -65,8 +65,8 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
 
   const handleCategoryChange = (newCat: ExpenseCategory) => {
     setCategorie(newCat);
-    const available = SOUS_CATEGORIES_MAP[newCat] || ['Divers'];
-    setSousCategorie(available[0]);
+    const available = categoriesService.getSubcategories(newCat);
+    setSousCategorie(available[0] || 'Divers');
   };
 
   // Gestion des articles en mode édition
@@ -114,7 +114,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
     setIsEditing(false);
   };
 
-  const categoryMeta = CATEGORIES_CONFIG[expense.categorie] || CATEGORIES_CONFIG.Autre;
+  const categoryMeta = categoriesService.getCategoryMeta(expense.categorie);
   const articlesSum = articles.reduce((acc, a) => acc + (a.prix || 0) * (a.quantite || 1), 0);
 
   return (
@@ -244,7 +244,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
                       onChange={(e) => handleCategoryChange(e.target.value as ExpenseCategory)}
                       className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                     >
-                      {Object.keys(CATEGORIES_CONFIG).map((cat) => (
+                      {categoriesService.getCategoryNames().map((cat) => (
                         <option key={cat} value={cat}>
                           {cat}
                         </option>
@@ -260,7 +260,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
                       onChange={(e) => setSousCategorie(e.target.value)}
                       className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                     >
-                      {(SOUS_CATEGORIES_MAP[categorie] || ['Divers']).map((sub) => (
+                      {categoriesService.getSubcategories(categorie).map((sub) => (
                         <option key={sub} value={sub}>
                           {sub}
                         </option>
@@ -269,39 +269,28 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
                   </div>
                 </div>
 
-                {/* ÉDITION COMPLÈTE DES ARTICLES */}
+                {/* ÉDITION COMPLÈTE DES ARTICLES AVEC POINT DE REPÈRE */}
                 <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                        articles ({articles.length})
-                      </span>
-                      {articles.length > 0 && (
-                        <span className="text-[11px] font-mono tabular-nums text-slate-400">
-                          Total lignes : {articlesSum.toFixed(2)} €
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {articles.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={handleSumArticlesToTotal}
-                          className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
-                        >
-                          Appliquer au montant total
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={handleAddArticle}
-                        className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 flex items-center gap-1"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>Ajouter un article</span>
-                      </button>
-                    </div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                      articles ({articles.length})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleAddArticle}
+                      className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Ajouter un article</span>
+                    </button>
                   </div>
+
+                  {/* Point de repère interactif : total coût + nbr articles + comparaison montant ticket */}
+                  <ArticlesSummaryRepere
+                    articles={articles}
+                    montantTotal={Number(montantTotal)}
+                    onApplyTotal={handleSumArticlesToTotal}
+                  />
 
                   {articles.length === 0 ? (
                     <div className="py-3 text-center text-xs text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-lg">

@@ -2,7 +2,8 @@
  * Module Gestion des Données & Portabilité JSON
  * - Export JSON strict respectant le schéma d'objet demandé
  * - Importation avec validation de structure, support fichier & copier/coller direct
- * - Export CSV pour tableurs
+ * - Choix explicite du mode d'import : Remplacer (écraser) vs Fusionner (ajouter)
+ * - Tolérance sur les imports quasi-vides (champs partiels)
  * - Réinitialisation totale et rechargement démo sécurisés via modal (sans window.confirm)
  */
 
@@ -21,19 +22,25 @@ import {
   ClipboardPaste,
   FileText,
   FileJson,
+  RefreshCw,
+  PlusCircle,
+  FolderTree,
 } from 'lucide-react';
 import { storageService } from '../services/storage';
+import { categoriesService } from '../services/categoriesService';
 import { TransactionTicket } from '../types/expense';
 import { ConfirmDialog } from './ConfirmDialog';
 
 interface DataManagementProps {
   expenses: TransactionTicket[];
-  onDataChanged: () => void;
+  onDataChanged: () => void | Promise<void>;
+  onNavigateToCategories?: () => void;
 }
 
 export const DataManagement: React.FC<DataManagementProps> = ({
   expenses,
   onDataChanged,
+  onNavigateToCategories,
 }) => {
   const [importStatus, setImportStatus] = useState<{
     type: 'success' | 'error' | null;
@@ -42,6 +49,7 @@ export const DataManagement: React.FC<DataManagementProps> = ({
   }>({ type: null, message: '' });
 
   const [importTab, setImportTab] = useState<'file' | 'paste'>('file');
+  const [importMode, setImportMode] = useState<'replace' | 'merge'>('replace');
   const [pastedJsonText, setPastedJsonText] = useState<string>('');
   const [isDragOver, setIsDragOver] = useState<boolean>(false);
 
@@ -101,37 +109,47 @@ export const DataManagement: React.FC<DataManagementProps> = ({
 
   const processJsonString = async (jsonString: string) => {
     if (!jsonString.trim()) {
+      if (importMode === 'replace') {
+        await storageService.clear();
+        await onDataChanged();
+        setImportStatus({
+          type: 'success',
+          message: 'Import vide en mode Remplacement : la base a été entièrement vidée (0 transaction).',
+        });
+        return;
+      }
       setImportStatus({
         type: 'error',
-        message: 'Le contenu JSON est vide. Veuillez coller ou téléverser du JSON valide.',
+        message: 'Le contenu JSON est vide. Aucun ticket n\'a été ajouté.',
       });
       return;
     }
 
     try {
-      const result = await storageService.importJSON(jsonString);
+      const result = await storageService.importJSON(jsonString, importMode);
 
-      if (result.errors.length > 0) {
+      if (importMode === 'replace') {
         setImportStatus({
-          type: result.importedCount > 0 ? 'success' : 'error',
-          message: `${result.importedCount} transaction(s) importée(s) avec succès.`,
-          details: result.errors,
+          type: 'success',
+          message: `Remplacement effectué : ${result.importedCount} transaction(s) chargée(s). La base contient désormais ${result.totalCount} transaction(s).`,
+          details: result.errors.length > 0 ? result.errors : undefined,
         });
       } else {
         setImportStatus({
-          type: 'success',
-          message: `Succès : ${result.importedCount} transaction(s) importée(s) et validée(s) dans la base locale.`,
+          type: result.importedCount > 0 ? 'success' : 'error',
+          message: `${result.importedCount} transaction(s) ajoutée(s). La base contient désormais ${result.totalCount} transaction(s).`,
+          details: result.errors.length > 0 ? result.errors : undefined,
         });
       }
 
-      onDataChanged();
+      await onDataChanged();
       if (result.importedCount > 0) {
         setPastedJsonText('');
       }
     } catch (err: any) {
       setImportStatus({
         type: 'error',
-        message: `Fichier JSON corrompu ou invalide: ${err.message}`,
+        message: `Erreur lors de l'import JSON : ${err.message}`,
       });
     }
   };
@@ -166,7 +184,7 @@ export const DataManagement: React.FC<DataManagementProps> = ({
   const handleSeedDemoConfirmed = async () => {
     setShowSeedConfirm(false);
     await storageService.seedDemoData(true);
-    onDataChanged();
+    await onDataChanged();
     setImportStatus({
       type: 'success',
       message: 'Jeu de démonstration chargé dans la base.',
@@ -176,10 +194,10 @@ export const DataManagement: React.FC<DataManagementProps> = ({
   const handleClearAllConfirmed = async () => {
     setShowClearConfirm(false);
     await storageService.clear();
-    onDataChanged();
+    await onDataChanged();
     setImportStatus({
       type: 'success',
-      message: 'Base locale entièrement vidée (IndexedDB et LocalStorage réinitialisés).',
+      message: 'Base locale entièrement réinitialisée : 0 transaction restante.',
     });
   };
 
@@ -247,6 +265,17 @@ export const DataManagement: React.FC<DataManagementProps> = ({
     setImportTab('paste');
   };
 
+  const handleLoadQuasiEmptySample = () => {
+    const quasiEmpty = [
+      {
+        commercant: 'Café de la Gare',
+        montant_total: 3.2
+      }
+    ];
+    setPastedJsonText(JSON.stringify(quasiEmpty, null, 2));
+    setImportTab('paste');
+  };
+
   const totalAmountSum = expenses.reduce((sum, item) => sum + item.montant_total, 0);
 
   return (
@@ -281,7 +310,7 @@ export const DataManagement: React.FC<DataManagementProps> = ({
             <div className="flex-1 font-medium">{importStatus.message}</div>
             <button
               onClick={() => setImportStatus({ type: null, message: '' })}
-              className="text-slate-400 hover:text-slate-600"
+              className="text-slate-400 hover:text-slate-600 cursor-pointer"
             >
               ✕
             </button>
@@ -307,14 +336,14 @@ export const DataManagement: React.FC<DataManagementProps> = ({
           </div>
           <button
             onClick={handleDownloadSampleJSON}
-            className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 rounded border border-emerald-200 dark:border-emerald-800"
+            className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 rounded border border-emerald-200 dark:border-emerald-800 cursor-pointer"
           >
             <Download className="w-3 h-3" />
             <span>Télécharger un modèle JSON</span>
           </button>
         </div>
         <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-          Toute importation et exportation applique scrupuleusement la structure suivante (avec tolérance automatique sur les montants sous forme de chaîne et les champs optionnels) :
+          Toute importation et exportation applique scrupuleusement la structure suivante (avec tolérance automatique sur les objets partiels ou quasi-vides) :
         </p>
         <pre className="p-3.5 rounded-lg bg-slate-950 text-slate-300 font-mono text-[11px] overflow-x-auto leading-relaxed border border-slate-800">
 {`{
@@ -398,7 +427,7 @@ export const DataManagement: React.FC<DataManagementProps> = ({
             className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-colors cursor-pointer"
           >
             <Download className="w-4 h-4" />
-            <span>Télécharger l'export JSON ({expenses.length} tickets)</span>
+            <span>Télécharger l'export JSON ({expenses.length} ticket{expenses.length > 1 ? 's' : ''})</span>
           </button>
         </div>
 
@@ -425,8 +454,8 @@ export const DataManagement: React.FC<DataManagementProps> = ({
       </div>
 
       {/* Module Importation JSON Renforcé */}
-      <div className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-4">
-        <div className="flex items-center justify-between">
+      <div className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Upload className="w-4 h-4 text-purple-600 dark:text-purple-400" />
             <h4 className="text-sm font-bold text-slate-900 dark:text-white">
@@ -438,7 +467,7 @@ export const DataManagement: React.FC<DataManagementProps> = ({
           <div className="flex items-center rounded-lg bg-slate-100 dark:bg-slate-800 p-1 text-xs">
             <button
               onClick={() => setImportTab('file')}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded font-medium transition-colors ${
+              className={`flex items-center gap-1.5 px-3 py-1 rounded font-medium transition-colors cursor-pointer ${
                 importTab === 'file'
                   ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
                   : 'text-slate-500 dark:text-slate-400 hover:text-slate-900'
@@ -449,7 +478,7 @@ export const DataManagement: React.FC<DataManagementProps> = ({
             </button>
             <button
               onClick={() => setImportTab('paste')}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded font-medium transition-colors ${
+              className={`flex items-center gap-1.5 px-3 py-1 rounded font-medium transition-colors cursor-pointer ${
                 importTab === 'paste'
                   ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
                   : 'text-slate-500 dark:text-slate-400 hover:text-slate-900'
@@ -461,9 +490,65 @@ export const DataManagement: React.FC<DataManagementProps> = ({
           </div>
         </div>
 
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          Reconnaît les tableaux simples <code className="text-purple-600 dark:text-purple-400">[ ... ]</code> ou les objets encapsulés <code className="text-purple-600 dark:text-purple-400">&#123; "transactions": [ ... ] &#125;</code>.
-        </p>
+        {/* Sélection du mode d'import : Remplacement vs Fusion */}
+        <div className="p-3.5 rounded-lg bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 space-y-2">
+          <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 block">
+            Mode d'importation :
+          </span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+            <label
+              className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                importMode === 'replace'
+                  ? 'border-purple-500 bg-purple-50/40 dark:bg-purple-950/20 text-purple-950 dark:text-purple-200'
+                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300'
+              }`}
+            >
+              <input
+                type="radio"
+                name="importMode"
+                value="replace"
+                checked={importMode === 'replace'}
+                onChange={() => setImportMode('replace')}
+                className="mt-0.5 text-purple-600 focus:ring-purple-500"
+              />
+              <div>
+                <div className="font-semibold flex items-center gap-1.5">
+                  <RefreshCw className="w-3 h-3 text-purple-600 dark:text-purple-400" />
+                  <span>Remplacer l'intégralité de la base</span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  Écrase les {expenses.length} transaction(s) actuelles. Même si le fichier est vide ou quasi-vide, la base reflètera fidèlement le fichier.
+                </p>
+              </div>
+            </label>
+
+            <label
+              className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                importMode === 'merge'
+                  ? 'border-purple-500 bg-purple-50/40 dark:bg-purple-950/20 text-purple-950 dark:text-purple-200'
+                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300'
+              }`}
+            >
+              <input
+                type="radio"
+                name="importMode"
+                value="merge"
+                checked={importMode === 'merge'}
+                onChange={() => setImportMode('merge')}
+                className="mt-0.5 text-purple-600 focus:ring-purple-500"
+              />
+              <div>
+                <div className="font-semibold flex items-center gap-1.5">
+                  <PlusCircle className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                  <span>Ajouter / Fusionner</span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  Conserve les transactions actuelles et ajoute les tickets du fichier.
+                </p>
+              </div>
+            </label>
+          </div>
+        </div>
 
         {importTab === 'file' ? (
           <div
@@ -510,27 +595,46 @@ export const DataManagement: React.FC<DataManagementProps> = ({
           </div>
         ) : (
           <div className="space-y-3">
-            <div className="flex items-center justify-between text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
               <label className="font-medium text-slate-700 dark:text-slate-300">
                 Collez votre texte JSON ci-dessous :
               </label>
-              <button
-                type="button"
-                onClick={handleLoadSampleIntoTextarea}
-                className="text-[11px] text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1"
-              >
-                <FileText className="w-3 h-3" />
-                <span>Insérer un exemple de test</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleLoadQuasiEmptySample}
+                  className="text-[11px] text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <FileText className="w-3 h-3" />
+                  <span>Exemple quasi-vide (1 champ)</span>
+                </button>
+                <span className="text-slate-300">·</span>
+                <button
+                  type="button"
+                  onClick={handleLoadSampleIntoTextarea}
+                  className="text-[11px] text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <FileText className="w-3 h-3" />
+                  <span>Exemple complet</span>
+                </button>
+              </div>
             </div>
             <textarea
               value={pastedJsonText}
               onChange={(e) => setPastedJsonText(e.target.value)}
-              placeholder='[ { "commercant": "Monoprix", "montant_total": 15.2, "date": "2026-11-05", "heure": "12:00", "tva": 1.5, "categorie": "Alimentation", "sous_categorie": "Supermarché & Courses", "articles": [] } ]'
+              placeholder='[ { "commercant": "Monoprix", "montant_total": 15.2 } ]'
               rows={6}
               className="w-full p-3 font-mono text-[11px] rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
             />
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => processJsonString('[]')}
+                className="px-3 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+                title="Tester l'import d'un tableau vide []"
+              >
+                Tester import vide []
+              </button>
               <button
                 type="button"
                 onClick={() => processJsonString(pastedJsonText)}
@@ -538,11 +642,60 @@ export const DataManagement: React.FC<DataManagementProps> = ({
                 className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg shadow-sm transition-colors cursor-pointer"
               >
                 <Upload className="w-3.5 h-3.5" />
-                <span>Valider et importer le JSON collé</span>
+                <span>
+                  {importMode === 'replace' ? 'Remplacer la base par le JSON collé' : 'Ajouter le JSON collé'}
+                </span>
               </button>
             </div>
           </div>
         )}
+      </div>
+
+      {/* Configuration Dédiée des Catégories & Sous-Catégories */}
+      <div className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <FolderTree className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                Configuration des Catégories & Sous-Catégories
+              </h4>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Gérez votre nomenclature de dépenses dans un fichier JSON séparé (SANS données de tickets).
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                const jsonContent = categoriesService.exportJSON();
+                const blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `scandepense_categories_config.json`;
+                link.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+              title="Télécharger la configuration JSON actuelle"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Exporter conf JSON</span>
+            </button>
+
+            {onNavigateToCategories && (
+              <button
+                onClick={onNavigateToCategories}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-colors cursor-pointer"
+              >
+                <FolderTree className="w-3.5 h-3.5" />
+                <span>Gérer les catégories</span>
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Maintenance */}
@@ -553,14 +706,14 @@ export const DataManagement: React.FC<DataManagementProps> = ({
         <div className="flex flex-wrap items-center gap-3">
           <button
             onClick={() => setShowSeedConfirm(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg cursor-pointer"
+            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg cursor-pointer transition-colors"
           >
             <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
             <span>Recharger les exemples démo</span>
           </button>
           <button
             onClick={() => setShowClearConfirm(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg cursor-pointer"
+            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg cursor-pointer transition-colors"
           >
             <Trash2 className="w-3.5 h-3.5" />
             <span>Réinitialiser la base locale (Suppression totale)</span>
@@ -572,7 +725,7 @@ export const DataManagement: React.FC<DataManagementProps> = ({
       <ConfirmDialog
         isOpen={showClearConfirm}
         title="Suppression totale de la base locale"
-        message="ATTENTION : Êtes-vous certain de vouloir supprimer TOUTES les transactions enregistrées ? Cette opération videra intégralement la base IndexedDB et le LocalStorage."
+        message={`ATTENTION : Êtes-vous certain de vouloir supprimer définitivement TOUTES les ${expenses.length} transaction(s) ? La base sera réinitialisée à 0 ticket sans rechargement automatique.`}
         confirmLabel="Tout supprimer définitivement"
         cancelLabel="Annuler"
         isDestructive={true}
