@@ -1,0 +1,6 @@
+{
+  "name": "ScanDépense - Gestion & Scan de Tickets",
+  "description": "Application web autonome et ultra-légère de gestion de dépenses avec scan intelligent de tickets de caisse, OCR et visualisations Chart.js.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
